@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+ai_data/
+analytics_data/
+brain_data/
+creative_data/
+executor_data/
+attribution_data/
+*.json
+!*.template.json
