@@ -1,6 +1,15 @@
 {
+  "_comment": "===== 聚光AI投手 配置文件 =====",
+  "_comment_app_id": "从聚光后台「工具→开发工具」复制 AppID",
+  "_comment_app_secret": "同上，注意保密，不要分享给他人",
+  "_comment_advertiser_id": "你的广告主ID，打开聚光后台左上角就能看到",
+  "_comment_redirect_uri": "OAuth授权回调地址，用AI投手提供的默认值即可",
+  "_comment_token_file": "授权令牌存储文件，不用改，AI投手自动管理",
+  "_comment_api_base_url": "聚光API地址，不用改",
+
   "app_id": "YOUR_APP_ID",
   "app_secret": "YOUR_APP_SECRET",
+  "advertiser_id": "YOUR_ADVERTISER_ID",
   "redirect_uri": "YOUR_REDIRECT_URI",
   "auth_url": "https://ad-market.xiaohongshu.com/auth?appId=YOUR_APP_ID&scope=[\"report_service\",\"ad_query\",\"ad_manage\",\"account_manage\"]&redirectUri=YOUR_REDIRECT_URI&state=abcd",
   "token_file": "xiaohongshu_token.json",
