@@ -1,7 +1,7 @@
 {
   "name": "聚光AI投手·小红书广告智能优化助手",
-  "version": "4.3.0",
-  "description": "聚光AI投手·小红书广告智能优化助手 — 智能投手：主动问目标、给方案、帮执行、提定时。覆盖数据大盘、智能日报、计划分析、创意筛查、创意优选、智能创编、僵尸清理、新手引导、预警诊断、定时任务。",
+  "version": "4.4.0",
+  "description": "聚光AI投手·小红书广告智能优化助手 — 明确能力边界、已知限制、边界处理、快速上手。智能投手：主动问目标、给方案、帮执行、提定时。",
   "author": "xueji",
   "tags": ["xiaohongshu", "ad", "juguang", "ai", "marketing", "advertising", "beginner-friendly", "creative-screening", "proactive-agent", "automation", "scheduled-tasks"],
   "files": [
