@@ -1,26 +1,37 @@
-# 小红书聚光AI运营助手 v3.11.0
+# 小红书聚光AI运营助手 v4.2.0 🧠
 
-## 简介
+## 「智能投手」— 主动问目标、给方案、帮执行
 
-小红书聚光平台AI运营助手，提供智能投放管理、数据分析、创意优化、智能决策等功能。支持自然语言交互，帮助运营人员高效管理聚光广告投放。
+v4.2 在 v4.1 创意筛查的基础上，从"报告生成器"升级为"主动出击的智能投手"。
 
-## 功能特性
+> **核心理念**：不只给数据，而是追问目标 → 定制方案 → 主动帮执行 → 闭环总结。
 
-- 📊 **数据分析**：账户数据、消耗数据、计划/单元/创意/笔记数据
-- 📈 **报表自动化**：日报、周报自动生成，带环比分析
-- 🔍 **智能分析**：优质创意筛选、关键词推荐、行业类目、人群预估
-- ⚡ **投放管理**：计划创建、状态管理、单元管理、创意管理
-- 🧠 **AI大脑**：自动学习、规律发现、智能决策、预测分析
-- 📊 **高级分析**：A/B测试、归因分析、预算分配
-- ⚡ **批量操作**：批量暂停/启动/修改预算/修改出价
-- 🚨 **数据预警**：消耗超标、CTR过低、CPC过高预警
-- 🎯 **智能投放**：自动创建计划、自动优化计划
+## 🆕 v4.2 亮点
+
+- 🧠 **主动式对话**：筛查完创意 → 追问转化目标（咨询/表单/销量/种草）→ 目标不同策略完全不同
+- 🎯 **4 轮智能对话**：筛查摘要 → 目标追问 → 定制方案 → 帮执行 → 闭环总结
+- 🤖 **主动帮执行**：不只说"建议关停"，而是问"要不要我帮你关停？要不要帮你建新计划？"
+- 📊 **目标×策略对照表**：4 种转化目标 × 4 种行动策略，AI 自动匹配最优方案
+- 🍽️ **行动菜单**：每次分析完主动展示 6 项可选操作（关停/建计划/调出价/优化定向/详报/自动体检）
+
+## 🆕 v4.1 亮点
+
+- 🔬 **创意筛查**：6维评分 × 行业基准 × 趋势检测 × 问题诊断 → 明确的投/不投决策
+- 🩺 **差创意自动诊断**：6种常见问题自动检测并给修复方案
+
+## v4.0 亮点
+
+- 🤖 **对话式交互**：每次回复包含 数据 → 解读 → 建议 三层
+- 📊 **行业基准值**：5 大行业 × 5 个指标
+- 🎓 **5 轮新手引导**：自然对话式
+- 🩺 **业务诊断**：「为什么没转化」→ 四维排查
+- ✅ **前置检查**：操作前自动检查
 
 ## 安装
 
-1. 将本Skill解压到 `~/.openclaw/workspace/skills/xiaohongshu-juguang-ai/`
+1. 将本 Skill 解压到 `~/.workbuddy/skills/xiaohongshu-juguang-ai/`
 2. 编辑 `xiaohongshu_config.json`，填入你的聚光平台凭证
-3. 重启OpenClaw
+3. 重启 WorkBuddy
 
 ## 配置
 
@@ -38,80 +49,43 @@
 
 1. 打开聚光平台：https://ad.xiaohongshu.com
 2. 进入「应用管理」创建应用
-3. 获取AppID和AppSecret
+3. 获取 AppID 和 AppSecret
 
-## 使用示例
+## 使用方式
 
-```python
-from xiaohongshu_ai_assistant import AIOperationsAssistant
+**直接对话即可！** 试试这些：
 
-assistant = AIOperationsAssistant()
-
-# 获取欢迎消息
-welcome = assistant.get_welcome_message(is_connected=False)
-
-# 获取账号大盘
-dashboard = assistant.get_account_dashboard()
-print(assistant.format_dashboard(dashboard))
-
-# 获取智能日报
-daily = assistant.generate_smart_daily_report()
-
-# 分析计划表现
-analysis = assistant.analyze_campaign_performance()
-print(assistant.format_campaign_analysis(analysis))
-
-# 创意优选
-creative_analysis = assistant.analyze_creative_performance()
-print(assistant.format_creative_analysis(creative_analysis))
-
-# 新手向导
-wizard = assistant.get_beginner_wizard(step=1)
-next_wizard, context = assistant.process_beginner_wizard(step=1, user_choice=0)
-```
+- 「看看今天数据」「大盘怎么样」
+- 「生成昨天的日报」
+- 「分析一下我的计划」
+- 「帮我投一个酒店广告，日预算 200」
+- 「哪个创意表现最好？」
+- 「清理僵尸计划」
+- 「怎么投放？」（新手引导）
+- 「为什么我的广告没有咨询？」（业务诊断）
 
 ## 注意事项
 
-1. **安全第一**：所有涉及修改、删除、新增投放设置的接口，均需用户确认后执行
-2. **消耗统计**：必须分普通投放+简单投两套拉取后汇总，禁止用delivery_type参数区分
-3. **数据时效**：离线报表T+1上午10点出数，实时报表5-10分钟延迟
-4. **批量限制**：批量操作单次上限20个ID
-5. **QPS限制**：普通接口10次/秒，报表5次/秒
+1. **操作前确认**：所有增/删/改操作都会先展示预览，等你确认后才执行
+2. **金额单位**：API 返回的金额是「分」，AI 会自动转成「元」展示
+3. **数据时效**：离线报表 T+1 上午 10 点出数，实时报表 5-10 分钟延迟
+4. **批量限制**：批量操作单次上限 20 个 ID
 
 ## 文件说明
 
 | 文件 | 说明 |
 |------|------|
-| `SKILL.md` | Skill说明文档 |
-| `_meta.json` | SkillHub元数据 |
-| `xiaohongshu_juguang_sdk.py` | SDK核心（45个方法） |
-| `xiaohongshu_sdk_enhancer.py` | SDK增强器 |
-| `xiaohongshu_reports.py` | 报表引擎 |
-| `xiaohongshu_ai_assistant.py` | AI运营助手（v2.4完整版） |
-| `xiaohongshu_config.json` | 配置文件模板 |
+| `SKILL.md` | Skill 说明文档（v4.0 小白友好型） |
+| `README.md` | 本文档 |
+| `CHANGELOG.md` | 更新日志 |
+| `_meta.json` | SkillHub 发布元数据 |
+| `requirements.txt` | Python 依赖声明 |
+| `xiaohongshu_config.example.json` | 配置文件模板 |
+| `scripts/` | Python 模块包（16 个文件） |
 
 ## 更新日志
 
-### v2.4.0 (2026-05-28)
-- 新增账号大盘功能
-- 新增投放规则库（9大类）
-- 新增新手模式（11步交互式向导）
-- 新增僵尸计划清理
-- 新增创意优选功能
-- 优化欢迎消息（未接入引导+直接给链接）
-
-### v2.3.0 (2026-05-28)
-- 新增智能创编（自然语言解析）
-
-### v2.2.0 (2026-05-28)
-- 新增快速执行（一键操作、批量操作）
-
-### v2.1.0 (2026-05-28)
-- 新增AI分析（计划表现分析、优化建议）
-
-### v2.0.0 (2026-05-28)
-- 新增智能日报（带环比分析）
-- 新增实时预警（24h监控）
+详见 [CHANGELOG.md](./CHANGELOG.md)，版本记录 v2.0.0 → v4.0.0。
 
 ## 许可证
 

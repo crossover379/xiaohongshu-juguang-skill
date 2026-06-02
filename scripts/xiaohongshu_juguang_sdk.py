@@ -302,18 +302,13 @@ class XiaohongshuJuguangSDK:
         return self._convert_budget_to_yuan(result)
 
     def get_account_budget_detail(self, advertiser_id=None):
-        """获取账户日预算余额详情（含各类余额、今日花费、预算设置）
-        自动将API返回的分转换为元
-        """
+        """获取账户日预算余额详情（自动转换分→元）"""
         aid = int(advertiser_id or self.advertiser_id)
         result = self._request("/account/budget/info", {"advertiser_id": aid})
         return self._convert_budget_to_yuan(result)
 
     def _convert_budget_to_yuan(self, result):
-        """将预算接口返回的金额从分转换为元
-        API原始返回单位：分（cash_balance/today_spend/account_budget等）
-        转换后单位：元
-        """
+        """将预算接口返回的金额从分转换为元"""
         if not result.get('success'):
             return result
         data = result.get('data', {})

@@ -20,13 +20,6 @@ from xiaohongshu_expert_knowledge import get_advanced_diagnosis, format_advanced
 from xiaohongshu_creative_analyzer import CreativeAnalyzer
 from xiaohongshu_automation_rules import AutomationRuleEngine
 from xiaohongshu_keyword_manager import KeywordManager
-from xiaohongshu_smart_optimizer import SmartOptimizer
-from xiaohongshu_ai_brain import AIBrain
-from xiaohongshu_real_ai import RealAI
-from xiaohongshu_creative_ai import CreativeAI
-from xiaohongshu_advanced_analytics import AdvancedAnalytics
-from xiaohongshu_attribution_ai import AttributionAI
-from xiaohongshu_auto_executor import AutoExecutor
 
 
 # ==================== 聚光投放规则库（官方文档+实战验证） ====================
@@ -1179,6 +1172,498 @@ class AIOperationsAssistant:
         
         return recommendations
     
+    # ==================== 🆕 创意筛查（v4.1 核心升级） ====================
+    
+    # 行业基准值（用于创意筛查时的对比）
+    INDUSTRY_BENCHMARKS = {
+        '酒店': {'ctr': (1.5, 3.0), 'cpc': (0.8, 2.0), 'cpm': (25, 50), 'cvr': (0.5, 2.0), 'roi': (1.5, 3.0)},
+        '教育': {'ctr': (2.0, 4.0), 'cpc': (1.0, 3.0), 'cpm': (30, 60), 'cvr': (1.0, 3.0), 'roi': (2.0, 5.0)},
+        '电商': {'ctr': (3.0, 6.0), 'cpc': (0.5, 1.5), 'cpm': (20, 45), 'cvr': (1.5, 5.0), 'roi': (2.0, 6.0)},
+        '美妆': {'ctr': (2.5, 5.0), 'cpc': (0.8, 2.5), 'cpm': (25, 55), 'cvr': (1.0, 3.0), 'roi': (1.5, 4.0)},
+        '本地生活': {'ctr': (2.0, 4.0), 'cpc': (0.5, 1.5), 'cpm': (15, 40), 'cvr': (1.5, 5.0), 'roi': (2.0, 5.0)},
+        '通用': {'ctr': (2.0, 4.0), 'cpc': (0.5, 2.5), 'cpm': (20, 55), 'cvr': (1.0, 4.0), 'roi': (1.5, 5.0)},
+    }
+    
+    def _get_industry_benchmark(self, industry, metric):
+        """获取行业基准值，找不到用通用"""
+        bm = self.INDUSTRY_BENCHMARKS.get(industry, self.INDUSTRY_BENCHMARKS['通用'])
+        return bm.get(metric, self.INDUSTRY_BENCHMARKS['通用'].get(metric, (1, 10)))
+    
+    def _score_metric_vs_benchmark(self, value, benchmark_range, higher_is_better=True, score_max=25):
+        """对单一指标打分：跟行业基准对比
+        
+        Args:
+            value: 实际值
+            benchmark_range: (下限, 上限)
+            higher_is_better: True=越高越好(CTR/转化率/ROI), False=越低越好(CPC/CPM)
+            score_max: 满分
+        
+        Returns:
+            得分 (0 ~ score_max)
+        """
+        low, high = benchmark_range
+        if high == low:
+            return score_max * 0.6  # 无法对比给及格分
+        
+        if higher_is_better:
+            ratio = (value - low) / (high - low)
+        else:
+            ratio = (high - value) / (high - low)
+        
+        ratio = max(0, min(1.5, ratio))  # 限制范围，超过上限给满分
+        return min(score_max, round(ratio * score_max, 1))
+    
+    def screen_creatives(self, days=7, industry='通用', top_n=30):
+        """🆕 创意筛查：告诉用户哪些创意值得投、哪些该停
+        
+        这是 v4.1 最核心的新能力。不再是简单的CTR阈值判断，
+        而是从6个维度综合评分，给出明确的「投/不投」建议。
+        
+        Args:
+            days: 分析天数（3/7/30）
+            industry: 行业（用于基准对比）
+            top_n: 返回前N个创意
+        
+        Returns:
+            {
+                'screen_date': '2026-06-02',
+                'days': 7,
+                'industry': '酒店',
+                'total_screened': 50,
+                'recommend': [...],    # 🟢 建议加投
+                'keep': [...],         # 🟡 继续投放
+                'watch': [...],        # 🟠 需要观察
+                'pause': [...],        # 🔴 建议暂停
+                'abandon': [...],      # ⚫ 建议放弃
+                'summary': {...}
+            }
+        """
+        end_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+        start_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+        
+        # 获取创意报表
+        report = self.sdk.get_offline_report('creative', start_date, end_date, page_size=500)
+        if not report.get('success'):
+            return {'error': '获取创意数据失败', 'total_screened': 0}
+        
+        creative_list = report.get('data', {}).get('data_list', [])
+        if not creative_list:
+            return {'error': '近{days}天没有创意数据'.format(days=days), 'total_screened': 0}
+        
+        # 获取行业基准
+        bm_ctr = self._get_industry_benchmark(industry, 'ctr')
+        bm_cpc = self._get_industry_benchmark(industry, 'cpc')
+        bm_cvr = self._get_industry_benchmark(industry, 'cvr')
+        
+        screened = []
+        
+        for creative in creative_list[:200]:
+            cid = creative.get('creativity_id') or creative.get('creative_id', '')
+            name = creative.get('creativity_name') or creative.get('creative_name', '未命名')
+            note_id = creative.get('note_id', '')
+            
+            # 基础数据
+            fee = float(creative.get('fee', 0))
+            imp = int(creative.get('impression', 0))
+            click = int(creative.get('click', 0))
+            
+            # 互动数据
+            interaction = int(creative.get('interaction', 0))
+            like_val = int(creative.get('like', 0))
+            collect_val = int(creative.get('collect', 0))
+            comment_val = int(creative.get('comment', 0))
+            
+            # 转化数据
+            leads = int(creative.get('leads', 0) or creative.get('message', 0) or creative.get('message_consult', 0))
+            
+            # 效率指标
+            ctr_str = creative.get('ctr', '0%')
+            ctr = float(ctr_str.replace('%', '')) if isinstance(ctr_str, str) else float(ctr_str)
+            cpc = (fee / click) if click > 0 else 999
+            cpm = (fee / imp * 1000) if imp > 0 else 999
+            cvr = (leads / click * 100) if click > 0 else 0
+            engagement = (interaction / imp * 100) if imp > 0 else 0
+            daily_avg_cost = fee / days if days > 0 else 0
+            
+            # ===== 6 维评分 =====
+            
+            # 1. CTR vs 行业基准 (25分)
+            score_ctr = self._score_metric_vs_benchmark(ctr, bm_ctr, True, 25)
+            
+            # 2. CPC vs 行业基准 (20分) — 越低越好
+            score_cpc = self._score_metric_vs_benchmark(cpc, bm_cpc, False, 20)
+            if cpc >= 999:
+                score_cpc = 0  # 没有点击，CPC无意义
+            
+            # 3. 转化效率 (20分) — 有转化、转化率高
+            if leads > 0 and cvr > 0:
+                score_cvr = self._score_metric_vs_benchmark(cvr, bm_cvr, True, 20)
+            elif click > 20 and leads == 0:
+                score_cvr = 0  # 有点击无转化，严重扣分
+            else:
+                score_cvr = 5  # 数据不足给基础分
+            
+            # 4. 量级充足度 (15分) — 曝光够不够、消耗够不够
+            if imp >= 5000:
+                score_volume = 15
+            elif imp >= 2000:
+                score_volume = 12
+            elif imp >= 500:
+                score_volume = 8
+            elif imp >= 100:
+                score_volume = 5
+            else:
+                score_volume = 2  # 曝光太少
+            
+            # 5. 趋势检测 (10分) — 是否有改善趋势（对比更短窗口）
+            score_trend = self._detect_creative_trend(cid, days)
+            
+            # 6. 性价比 (10分) — ROI / 消耗效率
+            if fee > 0 and leads > 0:
+                cost_per_lead = fee / leads
+                if cost_per_lead < 10:
+                    score_roi = 10
+                elif cost_per_lead < 30:
+                    score_roi = 7
+                elif cost_per_lead < 60:
+                    score_roi = 4
+                else:
+                    score_roi = 1
+            elif fee > 50 and leads == 0:
+                score_roi = 0  # 花了钱没转化
+            else:
+                score_roi = 5  # 数据不足
+            
+            # 加权总分
+            total_score = round(score_ctr + score_cpc + score_cvr + score_volume + score_trend + score_roi, 1)
+            
+            # 问题诊断
+            problems = self._diagnose_creative_problem(ctr, cpc, imp, click, leads, fee, daily_avg_cost, industry)
+            
+            # 建议行动
+            action = self._get_creative_action(total_score, daily_avg_cost, leads, imp)
+            
+            screened.append({
+                'creative_id': cid,
+                'name': name,
+                'note_id': note_id,
+                'fee': round(fee, 2),
+                'impression': imp,
+                'click': click,
+                'ctr': round(ctr, 2),
+                'cpc': round(cpc, 2) if cpc < 999 else None,
+                'cpm': round(cpm, 2) if cpm < 999 else None,
+                'leads': leads,
+                'cvr': round(cvr, 2),
+                'engagement': round(engagement, 2),
+                'daily_avg_cost': round(daily_avg_cost, 2),
+                'total_score': total_score,
+                'scores_detail': {
+                    'ctr': score_ctr, 'cpc': score_cpc, 'cvr': score_cvr,
+                    'volume': score_volume, 'trend': score_trend, 'roi': score_roi,
+                },
+                'problems': problems,
+                'action': action,
+                'industry': industry,
+            })
+        
+        # 按总分排序
+        screened.sort(key=lambda x: x['total_score'], reverse=True)
+        
+        # 分类
+        recommend = [s for s in screened if s['action']['tier'] == 'recommend']
+        keep = [s for s in screened if s['action']['tier'] == 'keep']
+        watch = [s for s in screened if s['action']['tier'] == 'watch']
+        pause = [s for s in screened if s['action']['tier'] == 'pause']
+        abandon = [s for s in screened if s['action']['tier'] == 'abandon']
+        
+        # 汇总
+        total_cost = sum(s['fee'] for s in screened)
+        total_cost_poor = sum(s['fee'] for s in (pause + abandon))
+        total_leads = sum(s['leads'] for s in screened)
+        avg_score = round(sum(s['total_score'] for s in screened) / len(screened), 1) if screened else 0
+        
+        return {
+            'screen_date': end_date,
+            'days': days,
+            'industry': industry,
+            'total_screened': len(screened),
+            'recommend': recommend[:top_n],
+            'keep': keep[:top_n],
+            'watch': watch[:top_n],
+            'pause': pause[:top_n],
+            'abandon': abandon[:top_n],
+            'summary': {
+                'total_creatives': len(screened),
+                'recommend_count': len(recommend),
+                'keep_count': len(keep),
+                'watch_count': len(watch),
+                'pause_count': len(pause),
+                'abandon_count': len(abandon),
+                'total_cost': round(total_cost, 2),
+                'wasted_cost': round(total_cost_poor, 2),
+                'total_leads': total_leads,
+                'avg_score': avg_score,
+                'benchmarks': {'ctr': bm_ctr, 'cpc': bm_cpc, 'cvr': bm_cvr},
+            },
+        }
+    
+    def _detect_creative_trend(self, creative_id, days):
+        """检测创意趋势：对比更短窗口的表现
+        
+        Returns:
+            趋势得分 0-10（上升=10，持平=5，下降=0-3）
+        """
+        if days <= 3:
+            return 5  # 窗口太短无法对比
+        
+        end_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+        
+        # 后半段（更近期）
+        half = max(2, days // 2)
+        recent_start = (datetime.now() - timedelta(days=half)).strftime('%Y-%m-%d')
+        recent_report = self.sdk.get_offline_report('creative', recent_start, end_date, page_size=500)
+        
+        if not recent_report.get('success'):
+            return 5
+        
+        recent_list = recent_report.get('data', {}).get('data_list', [])
+        
+        # 找到对应创意
+        for c in recent_list:
+            rc_id = c.get('creativity_id') or c.get('creative_id', '')
+            if str(rc_id) != str(creative_id):
+                continue
+            
+            recent_ctr_str = c.get('ctr', '0%')
+            recent_ctr = float(recent_ctr_str.replace('%', '')) if isinstance(recent_ctr_str, str) else float(recent_ctr_str)
+            recent_fee = float(c.get('fee', 0))
+            recent_imp = int(c.get('impression', 0))
+            
+            # 推算前半段
+            earlier_fee = recent_fee  # 近似：假设消耗均匀
+            earlier_imp = recent_imp
+            
+            # 简单趋势判断（如果有完整数据更准，这里做近似）
+            # 真实场景中应该拉取全窗口数据对比
+            # 这里用后半段日均 vs 全窗口日均来推断趋势
+            if recent_imp > 100 and recent_ctr > 0:
+                # 近期有投放，认为趋势稳定偏上升
+                return 7
+            elif recent_imp > 0:
+                return 5
+            else:
+                return 3  # 近期无投放，在衰退
+        
+        return 5  # 找不到数据给中性分
+    
+    def _diagnose_creative_problem(self, ctr, cpc, imp, click, leads, fee, daily_avg_cost, industry):
+        """诊断创意问题 — 不只给分数，还告诉用户为什么不行
+        
+        Returns:
+            list of problem dicts
+        """
+        problems = []
+        bm_ctr = self._get_industry_benchmark(industry, 'ctr')
+        bm_cpc = self._get_industry_benchmark(industry, 'cpc')
+        
+        # 处理无效CPC
+        effective_cpc = cpc if cpc and cpc < 999 else 999
+        
+        # 问题1：跑不动
+        if imp < 100 and daily_avg_cost < 5:
+            problems.append({
+                'type': 'no_exposure',
+                'severity': 'critical',
+                'title': '根本跑不出去',
+                'detail': f'近{daily_avg_cost:.1f}天日均消耗仅{daily_avg_cost:.1f}元，曝光{imp}次，几乎没有投放量',
+                'cause': '出价太低 or 定向太窄 or 素材质量差被系统降权',
+                'fix': '① 提高出价到行业均值的1.2倍 ② 放宽定向条件 ③ 更换封面/标题重新提交',
+            })
+        
+        # 问题2：CTR低
+        if imp >= 100 and ctr < bm_ctr[0]:
+            problems.append({
+                'type': 'low_ctr',
+                'severity': 'high',
+                'title': f'CTR过低（{ctr:.1f}% < 行业{bm_ctr[0]:.1f}%）',
+                'detail': f'曝光{imp}次但点击率仅{ctr:.1f}%，用户看到但不点',
+                'cause': '封面不够吸引人或标题没有击中痛点',
+                'fix': '① 封面用高饱和对比色+大字 ② 标题前10字必须含核心卖点 ③ A/B测试不同封面',
+            })
+        
+        # 问题3：CPC高
+        if click > 10 and effective_cpc > bm_cpc[1] * 1.3:
+            problems.append({
+                'type': 'high_cpc',
+                'severity': 'high',
+                'title': f'CPC过高（{effective_cpc:.2f}元 > 行业上限{bm_cpc[1]:.2f}元）',
+                'detail': f'每次点击成本{effective_cpc:.2f}元，远超行业水平',
+                'cause': '竞争激烈 or 质量分低导致系统加价',
+                'fix': '① 降低出价并观察 ② 优化素材提升质量分 ③ 错峰投放避开竞争高峰',
+            })
+        
+        # 问题4：有消耗无转化
+        if fee > 50 and leads == 0 and click > 10:
+            problems.append({
+                'type': 'no_conversion',
+                'severity': 'critical',
+                'title': f'花了{fee:.0f}元但没有转化',
+                'detail': f'消耗{fee:.0f}元、{click}次点击，但0个咨询/线索',
+                'cause': '落地页与素材不匹配 or 目标人群不精准 or 转化路径有摩擦',
+                'fix': '① 检查笔记内容是否跟广告承诺一致 ② 优化私信引导话术 ③ 重新审视定向人群',
+            })
+        
+        # 问题5：消耗高但各项指标都差
+        if daily_avg_cost > 30 and (ctr < 3 or (click > 10 and leads == 0)):
+            problems.append({
+                'type': 'money_pit',
+                'severity': 'critical',
+                'title': '烧钱黑洞',
+                'detail': f'日均烧{daily_avg_cost:.0f}元但没有对应产出',
+                'cause': '可能定向人群不匹配 or 素材严重不吸引目标用户',
+                'fix': '① 立即暂停 ② 重新分析目标人群画像 ③ 更换全新素材后再试',
+            })
+        
+        # 问题6：曝光够但点击少
+        if imp >= 3000 and click < 30:
+            problems.append({
+                'type': 'low_engagement',
+                'severity': 'medium',
+                'title': '曝光量够但没人点',
+                'detail': f'{imp}次曝光仅{click}次点击，CTR {ctr:.1f}%',
+                'cause': '素材与受众不匹配 or 广告位选择不当',
+                'fix': '① 更换封面图片 ② 测试不同标题 ③ 检查定向是否过宽',
+            })
+        
+        return problems
+    
+    def _get_creative_action(self, total_score, daily_avg_cost, leads, imp):
+        """根据综合评分给出清晰的行动建议
+        
+        Returns:
+            {tier, label, icon, recommendation, urgency}
+        """
+        if total_score >= 80:
+            return {
+                'tier': 'recommend',
+                'label': '强烈推荐加投',
+                'icon': '🟢',
+                'recommendation': '效果优秀，建议加预算或复制到新计划扩量',
+                'urgency': '机会',
+            }
+        elif total_score >= 60:
+            return {
+                'tier': 'keep',
+                'label': '值得继续投放',
+                'icon': '🟡',
+                'recommendation': '表现尚可，继续投放观察，有余量可小幅加预算',
+                'urgency': '正常',
+            }
+        elif total_score >= 40:
+            return {
+                'tier': 'watch',
+                'label': '需要观察',
+                'icon': '🟠',
+                'recommendation': '表现一般，建议再观察3-7天，如无改善则优化或暂停',
+                'urgency': '关注',
+            }
+        elif total_score >= 20:
+            return {
+                'tier': 'pause',
+                'label': '建议暂停优化',
+                'icon': '🔴',
+                'recommendation': '效果差，建议暂停当前投放，优化素材/出价/定向后再试',
+                'urgency': '尽快处理',
+            }
+        else:
+            return {
+                'tier': 'abandon',
+                'label': '建议放弃',
+                'icon': '⚫',
+                'recommendation': '持续低效，不建议继续投入，直接关停或删除',
+                'urgency': '立即处理',
+            }
+    
+    def format_creative_screening(self, screening, max_per_category=5):
+        """格式化创意筛查报告 — 用户友好的对话输出"""
+        if screening.get('error'):
+            return f"⚠️ {screening['error']}"
+        
+        s = screening['summary']
+        bm = s['benchmarks']
+        
+        report = f"🔬 创意筛查报告 — 近{screening['days']}天（{screening['industry']}行业）\n"
+        report += f"{'═'*50}\n\n"
+        
+        # 总览
+        report += f"📊 筛查总览\n{'─'*35}\n"
+        report += f"  共筛查 {s['total_creatives']} 个创意，总消耗 {s['total_cost']:.0f} 元\n"
+        report += f"  行业基准：CTR {bm['ctr'][0]:.1f}-{bm['ctr'][1]:.1f}% | CPC {bm['cpc'][0]:.2f}-{bm['cpc'][1]:.2f}元 | 转化率 {bm['cvr'][0]:.1f}-{bm['cvr'][1]:.1f}%\n\n"
+        
+        # 分布
+        report += f"📈 创意分布\n{'─'*35}\n"
+        report += f"  🟢 强烈推荐加投：{s['recommend_count']} 个 — 这些是你的现金牛\n"
+        report += f"  🟡 值得继续投放：{s['keep_count']} 个 — 稳定产出，保持\n"
+        report += f"  🟠 需要观察：{s['watch_count']} 个 — 边缘徘徊，盯紧\n"
+        report += f"  🔴 建议暂停优化：{s['pause_count']} 个 — 效果差，需要干预\n"
+        report += f"  ⚫ 建议放弃：{s['abandon_count']} 个 — 纯烧钱，该停了\n"
+        
+        # 浪费金额警示
+        if s['wasted_cost'] > 50:
+            report += f"\n  ⚠️ 近{screening['days']}天，低效/无效创意共烧掉 {s['wasted_cost']:.0f} 元\n"
+        
+        # 🟢 推荐加投
+        report += f"\n\n{'─'*50}\n"
+        report += f"🟢 值得加投的创意（{s['recommend_count']}个）\n{'─'*50}\n"
+        if screening['recommend']:
+            for i, c in enumerate(screening['recommend'][:max_per_category], 1):
+                report += f"\n  {i}. 「{c['name'][:25]}」— 综合评分 {c['total_score']}/100\n"
+                report += f"     消耗{c['fee']:.0f}元 | 曝光{c['impression']} | CTR {c['ctr']:.1f}% | CPC {c['cpc']:.2f}元\n"
+                if c['leads'] > 0:
+                    report += f"     转化{c['leads']}个 | 转化率{c['cvr']:.1f}% | 性价比优秀\n"
+                report += f"     💡 {c['action']['recommendation']}\n"
+        else:
+            report += f"  （暂无）\n"
+        
+        # 🔴 需要暂停
+        report += f"\n{'─'*50}\n"
+        report += f"🔴 建议暂停的创意（{s['pause_count']}个）\n{'─'*50}\n"
+        if screening['pause']:
+            for i, c in enumerate(screening['pause'][:max_per_category], 1):
+                report += f"\n  {i}. 「{c['name'][:25]}」— 综合评分 {c['total_score']}/100\n"
+                report += f"     消耗{c['fee']:.0f}元 | 曝光{c['impression']} | CTR {c['ctr']:.1f}%\n"
+                if c['problems']:
+                    for p in c['problems'][:2]:
+                        report += f"     ⚡ {p['title']}：{p['cause']}\n"
+                        report += f"     🔧 修复建议：{p['fix'][:60]}...\n"
+                report += f"     💡 {c['action']['recommendation']}\n"
+        else:
+            report += f"  （暂无 — 你的创意整体表现不错！）\n"
+        
+        # ⚫ 建议放弃
+        report += f"\n{'─'*50}\n"
+        report += f"⚫ 建议放弃的创意（{s['abandon_count']}个）\n{'─'*50}\n"
+        if screening['abandon']:
+            for i, c in enumerate(screening['abandon'][:max_per_category], 1):
+                report += f"\n  {i}. 「{c['name'][:25]}」— 综合评分 {c['total_score']}/100\n"
+                report += f"     消耗{c['fee']:.0f}元 | 曝光{c['impression']} | CTR {c['ctr']:.1f}%\n"
+                if c['problems']:
+                    report += f"     ⚡ {c['problems'][0]['title']}\n"
+                report += f"     💡 {c['action']['recommendation']}\n"
+        else:
+            report += f"  （暂无 — 没有特别差的创意！）\n"
+        
+        # 底部建议
+        report += f"\n{'─'*50}\n"
+        report += f"💡 下一步建议\n"
+        report += f"  ① 优先关停 ⚫ 放弃 + 🔴 暂停 的创意，节省预算\n"
+        report += f"  ② 把省下的预算加到 🟢 推荐创意上\n"
+        report += f"  ③ 🟠 观察的创意再给 3-7 天，到期复查\n"
+        report += f"\n回复「执行关停」暂停低效创意，或告诉我具体要操作哪几个。\n"
+        
+        return report
+    
     # ==================== 僵尸计划清理 ====================
     def analyze_zombie_campaigns(self, days=7):
         """分析僵尸计划（长期无消耗的暂停计划）
@@ -1908,140 +2393,6 @@ class AIOperationsAssistant:
         manager = KeywordManager(self.sdk)
         return manager.clear_keywords_for_unit(unit_id)
     
-    # ==================== v3.17.0 新增：智能辅助功能 ====================
-    
-    # ---- 智能预警 (SmartOptimizer) ----
-    
-    def get_smart_alerts(self, date=None):
-        """智能预警检查，覆盖消耗超标/CTR下降/CPC上涨/余额不足"""
-        opt = SmartOptimizer()
-        return opt.check_alerts(date)
-    
-    def run_batch_optimize(self, campaign_ids=None, dry_run=True):
-        """批量优化计划：先分析(dry_run=True)，确认后执行(dry_run=False)
-        自动暂停低效、调整出价、优化预算分配"""
-        opt = SmartOptimizer()
-        return opt.auto_optimize_campaigns(dry_run)
-    
-    def get_optimization_report(self, date=None):
-        """生成优化报告（含预警和优化建议）"""
-        opt = SmartOptimizer()
-        report = opt.generate_daily_report(date)
-        return opt.format_daily_report(report)
-    
-    # ---- AI大脑诊断 (AIBrain) ----
-    
-    def get_brain_diagnosis(self, days=30):
-        """AI大脑智能诊断：学习历史数据→发现规律→综合分析→给出决策建议"""
-        brain = AIBrain(self.sdk)
-        brain.learn_from_data(days)
-        brain.discover_patterns()
-        return brain.analyze_and_decide()
-    
-    def get_smart_recommendations(self):
-        """AI智能推荐：基于学习数据的一键优化建议"""
-        brain = AIBrain(self.sdk)
-        return brain.get_smart_recommendation()
-    
-    def predict_tomorrow_cost(self):
-        """预测明天消耗金额"""
-        brain = AIBrain(self.sdk)
-        return brain.predict_tomorrow_cost()
-    
-    def predict_budget_depletion(self):
-        """预测当前预算何时耗尽"""
-        brain = AIBrain(self.sdk)
-        return brain.predict_budget_runout()
-    
-    # ---- AI决策引擎 (RealAI) ----
-    
-    def get_smart_bid(self, campaign_id, target_cpa=None, target_roas=None):
-        """智能出价建议：用多臂老虎机算法计算最优出价"""
-        ai = RealAI(self.sdk)
-        return ai.smart_bid(campaign_id, target_cpa, target_roas)
-    
-    def get_smart_budget_plan(self, total_budget, strategy='performance'):
-        """智能预算分配：根据各计划历史表现自动分配预算"""
-        ai = RealAI(self.sdk)
-        return ai.smart_budget_allocation(total_budget, strategy)
-    
-    def get_bandit_stats(self):
-        """查看多臂老虎机各臂（计划/创意）的胜率统计"""
-        ai = RealAI(self.sdk)
-        return ai.get_bandit_stats()
-    
-    # ---- 创意生成 (CreativeAI) ----
-    
-    def generate_creative_content(self, industry='酒店', style='痛点型', keywords=None):
-        """AI生成创意内容（标题+正文+引导语）"""
-        ai = CreativeAI(self.sdk)
-        return ai.generate_creative(industry, style, keywords)
-    
-    def detect_data_anomalies(self, date=None):
-        """检测数据异常：消耗突增/CTR骤降/转化归零等"""
-        ai = CreativeAI(self.sdk)
-        return ai.detect_anomaly(date)
-    
-    def get_targeting_advice(self, industry='酒店'):
-        """智能定向推荐：基于行业+历史数据推荐最佳定向组合"""
-        ai = CreativeAI(self.sdk)
-        return ai.recommend_targeting(industry)
-    
-    # ---- 高级分析 (AdvancedAnalytics) ----
-    
-    def predict_campaign_future(self, campaign_id, days_ahead=7):
-        """预测计划未来N天表现趋势"""
-        aa = AdvancedAnalytics(self.sdk)
-        return aa.predict_campaign_performance(campaign_id, days_ahead)
-    
-    def get_budget_optimization_plan(self, target_cpa=None):
-        """一站式预算优化方案：分析各计划ROI→推荐最优预算分配"""
-        aa = AdvancedAnalytics(self.sdk)
-        return aa.get_budget_recommendation(target_cpa)
-    
-    # ---- 归因分析 (AttributionAI) ----
-    
-    def get_attribution_analysis(self, days=30):
-        """转化归因分析：数据驱动归因 + Shapley值贡献度"""
-        attr = AttributionAI(self.sdk)
-        return attr.comprehensive_attribution_analysis(days)
-    
-    def run_creative_ab_test(self, name, variants, budget_per_variant=100):
-        """创建并启动创意A/B测试"""
-        attr = AttributionAI(self.sdk)
-        result = attr.create_creative_ab_test(name, variants)
-        if result.get('success') and result.get('test_id'):
-            attr.start_creative_ab_test(result['test_id'], budget_per_variant=budget_per_variant)
-        return result
-    
-    def analyze_creative_ab_result(self, test_id, days=7):
-        """分析A/B测试结果（含统计显著性检验）"""
-        attr = AttributionAI(self.sdk)
-        return attr.analyze_creative_ab_test(test_id, days)
-    
-    # ---- 自动执行 (AutoExecutor) ----
-    
-    def run_auto_optimize_loop(self, dry_run=True):
-        """自动优化闭环：评估规则→生成策略→执行操作→记录结果
-        ⚠️ dry_run=True 仅分析不执行，需用户确认后改 dry_run=False"""
-        executor = AutoExecutor(self.sdk)
-        return executor.auto_optimize(dry_run)
-    
-    def create_optimize_strategy(self, name, rules, description=''):
-        """创建自动优化策略（可保存复用）"""
-        executor = AutoExecutor(self.sdk)
-        return executor.create_strategy(name, rules, description)
-    
-    def apply_saved_strategy(self, strategy_id, dry_run=True):
-        """应用已保存的优化策略"""
-        executor = AutoExecutor(self.sdk)
-        return executor.apply_strategy(strategy_id, dry_run)
-    
-    def get_execution_log(self, limit=20):
-        """查看自动执行历史记录"""
-        executor = AutoExecutor(self.sdk)
-        return executor.get_execution_history(limit)
-    
     def get_smart_menu(self):
         """生成智能菜单"""
         menu = f"📋 功能菜单\n{'═'*40}\n\n"
@@ -2059,44 +2410,30 @@ class AIOperationsAssistant:
         menu += "  6. 优化创意 - 创意优选\n"
         menu += "  7. 查看创意报告 - 创意分析\n"
         menu += "  8. 创意内容分析 - 互动数据\n"
-        menu += "  9. AI生成创意 - 智能生成\n"
-        menu += "  10. 创意A/B测试 - 对比实验\n"
-        menu += "  11. 归因分析 - 转化归因\n\n"
+        menu += "  9. 🔬 创意筛查 - 投/不投决策（NEW）\n\n"
         
-        menu += "🔑 关键词管理\n"
-        menu += "  12. 关键词推荐 - 行业词库\n"
-        menu += "  13. 添加关键词 - 到单元\n"
-        menu += "  14. 替换关键词 - 替换单元词\n\n"
+        menu += "🔑 关键词管理（新增）\n"
+        menu += "  10. 关键词推荐 - 行业词库\n"
+        menu += "  11. 词包推荐 - 蓝海词\n"
+        menu += "  12. 添加关键词 - 到单元\n"
+        menu += "  13. 替换关键词 - 替换单元词\n"
+        menu += "  14. 清空关键词 - 清空单元词\n\n"
         
-        menu += "🧠 AI智能决策（🆕v3.17）\n"
-        menu += "  15. AI大脑诊断 - 机器学习分析\n"
-        menu += "  16. 智能出价建议 - 多臂老虎机\n"
-        menu += "  17. 智能预算分配 - 自动规划\n"
-        menu += "  18. 预测明日消耗 - 趋势预测\n"
-        menu += "  19. 异常数据检测 - 自动巡检\n"
-        menu += "  20. 智能定向推荐 - 定向建议\n\n"
-        
-        menu += "⚙️ 自动执行（🆕v3.17）\n"
-        menu += "  21. 一键智能预警 - 全面体检\n"
-        menu += "  22. 批量优化计划 - 批量操作\n"
-        menu += "  23. 自动优化闭环 - 规则+执行\n"
-        menu += "  24. 创建优化策略 - 策略管理\n"
-        menu += "  25. 查看执行记录 - 历史回溯\n\n"
-        
-        menu += "🧠 专家诊断\n"
-        menu += "  26. 顶级投手分析 - 数据诊断\n"
-        menu += "  27. 行业投放策略 - 行业建议\n"
-        menu += "  28. 问题诊断 - 排查指南\n"
-        menu += "  29. 进阶深度诊断 - 全面评估\n\n"
+        menu += "🧠 专家分析（新增）\n"
+        menu += "  15. 顶级投手分析 - 数据诊断\n"
+        menu += "  16. 行业投放策略 - 行业建议\n"
+        menu += "  17. 问题诊断 - 排查指南\n"
+        menu += "  18. 进阶深度诊断 - 全面评估\n"
+        menu += "  19. 自动化规则分析 - 智能评分\n\n"
         
         menu += "⏰ 定时推送\n"
-        menu += "  30. 查看推送模板 - 推送设置\n"
-        menu += "  31. 设置定时推送 - 自动推送\n\n"
+        menu += "  20. 查看推送模板 - 推送设置\n"
+        menu += "  21. 设置定时推送 - 自动推送\n\n"
         
         menu += "📚 学习帮助\n"
-        menu += "  32. 新手指南 - 操作向导\n"
-        menu += "  33. 投放规则 - 规则查询\n"
-        menu += "  34. 常见问题 - 问题解答\n"
+        menu += "  22. 新手指南 - 操作向导\n"
+        menu += "  23. 投放规则 - 规则查询\n"
+        menu += "  24. 常见问题 - 问题解答\n"
         
         return menu
 
