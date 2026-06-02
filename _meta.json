@@ -1,0 +1,39 @@
+{
+  "name": "xiaohongshu-juguang-ai",
+  "version": "3.17.0",
+  "description": "小红书聚光AI运营助手 - 智能投放管理、数据分析、创意优化、新手引导。适用于小红书聚光广告投放的运营管理场景。",
+  "author": "xueji",
+  "license": "MIT",
+  "tags": ["xiaohongshu", "ad", "juguang", "ai", "marketing", "advertising"],
+  "entry": "SKILL.md",
+  "language": "zh-CN",
+  "category": "marketing",
+  "dependencies": {
+    "python": ">=3.8",
+    "packages": ["requests>=2.28.0"]
+  },
+  "files": [
+    "SKILL.md",
+    "README.md",
+    "CHANGELOG.md",
+    "requirements.txt",
+    "_meta.json",
+    "xiaohongshu_config.example.json",
+    "scripts/__init__.py",
+    "scripts/xiaohongshu_juguang_sdk.py",
+    "scripts/xiaohongshu_sdk_enhancer.py",
+    "scripts/xiaohongshu_reports.py",
+    "scripts/xiaohongshu_ai_assistant.py",
+    "scripts/xiaohongshu_automation_rules.py",
+    "scripts/xiaohongshu_creative_analyzer.py",
+    "scripts/xiaohongshu_keyword_manager.py",
+    "scripts/xiaohongshu_expert_knowledge.py",
+    "scripts/xiaohongshu_smart_optimizer.py",
+    "scripts/xiaohongshu_advanced_analytics.py",
+    "scripts/xiaohongshu_ai_brain.py",
+    "scripts/xiaohongshu_attribution_ai.py",
+    "scripts/xiaohongshu_creative_ai.py",
+    "scripts/xiaohongshu_real_ai.py",
+    "scripts/xiaohongshu_auto_executor.py"
+  ]
+}

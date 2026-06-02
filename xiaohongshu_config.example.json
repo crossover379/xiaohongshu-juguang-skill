@@ -1,0 +1,8 @@
+{
+  "app_id": "YOUR_APP_ID",
+  "app_secret": "YOUR_APP_SECRET",
+  "redirect_uri": "YOUR_REDIRECT_URI",
+  "auth_url": "https://ad-market.xiaohongshu.com/auth?appId=YOUR_APP_ID&scope=[\"report_service\",\"ad_query\",\"ad_manage\",\"account_manage\"]&redirectUri=YOUR_REDIRECT_URI&state=abcd",
+  "token_file": "xiaohongshu_token.json",
+  "api_base_url": "https://adapi.xiaohongshu.com/api/open/jg"
+}
