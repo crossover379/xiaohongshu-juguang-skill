@@ -296,33 +296,17 @@ class XiaohongshuJuguangSDK:
         return self._request_url("https://adapi.xiaohongshu.com/api/open/finance/transaction/record/query", data)
 
     def get_account_budget(self, advertiser_id=None):
-        """获取账户日预算余额（自动转换分→元）"""
+        """获取账户日预算余额"""
         aid = int(advertiser_id or self.advertiser_id)
-        result = self._request("/account/budget/info", {"advertiser_id": aid})
-        return self._convert_budget_to_yuan(result)
+        return self._request("/account/budget/info", {"advertiser_id": aid})
 
     def get_account_budget_detail(self, advertiser_id=None):
-        """获取账户日预算余额详情（自动转换分→元）"""
+        """获取账户日预算余额详情（含各类余额、今日花费、预算设置）
+        ⚠️ 返回金额单位为分（非元），account_budget也为分
+        展示前必须调用 fen_to_yuan() 转换：fen_to_yuan(data['available_balance']) → '100.00元'
+        """
         aid = int(advertiser_id or self.advertiser_id)
-        result = self._request("/account/budget/info", {"advertiser_id": aid})
-        return self._convert_budget_to_yuan(result)
-
-    def _convert_budget_to_yuan(self, result):
-        """将预算接口返回的金额从分转换为元"""
-        if not result.get('success'):
-            return result
-        data = result.get('data', {})
-        fen_fields = [
-            'cash_balance', 'return_balance', 'freeze_balance',
-            'today_spend', 'total_balance', 'credit_balance',
-            'available_balance', 'compensate_return_balance',
-            'account_budget'
-        ]
-        for field in fen_fields:
-            if field in data and data[field] is not None:
-                data[field] = round(data[field] / 100, 2)
-        result['data'] = data
-        return result
+        return self._request("/account/budget/info", {"advertiser_id": aid})
 
     def get_account_order_info(self, start_date, end_date, advertiser_id=None, page=1, page_size=50, 
                                account_types=None, data_type=None):
@@ -665,6 +649,142 @@ class XiaohongshuJuguangSDK:
         # 按评分排序
         notes.sort(key=lambda x: x['score'], reverse=True)
         return notes[:top_n]
+
+    def quick_create_search_campaign(self, campaign_name, note_id, bid_yuan=1.5,
+                                      daily_budget_yuan=100, keywords=None,
+                                      industry_keyword=None, conversion_type=3,
+                                      optimize_objective=13, bar_content="立即咨询"):
+        """🔥 一键创建搜索计划 — 只需传名字+出价+笔记ID
+        
+        搜索渠道固定参数（内部硬编码，不用传）：
+        - placement=2（搜索）
+        - marketing_target=9（客资收集）
+        - bidding_strategy=2（手动出价）
+        - search_flag=1（开启搜索）
+        - time_period 自动填满24小时×7天
+        
+        Args:
+            campaign_name: 计划名称
+            note_id: 笔记ID
+            bid_yuan: 出价（元），默认1.5元（搜索渠道建议区间）
+            daily_budget_yuan: 日预算（元），默认100元
+            keywords: 关键词列表 [{keyword, bid, phrase_match_type}]，bid单位分
+            industry_keyword: 行业关键词（如"酒店"、"旅游"），用于自动获取推荐关键词
+            conversion_type: 组件类型，默认3=私信组件
+            optimize_objective: 优化目标，默认13=私信开口
+            bar_content: 引导文案
+        
+        Returns:
+            {success, campaign_id, unit_id, creativity_id, keyword_result}
+        """
+        all_day = "111111111111111111111111"
+        daily_budget = int(daily_budget_yuan * 100)
+        bid = int(bid_yuan * 100)
+        
+        # 搜索渠道固定参数
+        _marketing_target = 9   # 客资收集
+        _placement = 2          # 搜索
+        _bidding_strategy = 2   # 手动出价
+        _search_flag = 1        # 开启搜索
+        
+        # 自动构建time_period
+        time_period = {
+            "mon": all_day, "tues": all_day, "wed": all_day,
+            "thur": all_day, "fri": all_day, "sat": all_day, "sun": all_day
+        }
+        
+        # 构建创意
+        creative = {
+            "creativity_name": campaign_name,
+            "note_id": str(note_id),
+            "conversion_type": conversion_type,
+            "note_source_type": 1,
+            "mask_gen": 2,
+            "title_gen": 2,
+            "component_conv_num_is_show": True
+        }
+        
+        # 客资收集模式添加私信配置
+        if _marketing_target == 9:
+            creative["bar_content"] = bar_content
+        
+        # 构建单元
+        unit = {
+            "unit_name": campaign_name + "_单元",
+            "target_type": 2,  # 智能定向
+            "event_bid": bid,
+            "target_info": {
+                "target_gender": "all",
+                "target_city_type": 0,
+                "target_city": "中国",
+                "target_area_code": "-1",
+                "target_age": "all",
+                "target_device": "all",
+                "target_device_price": "all",
+                "target_generalization_switch": 0,
+                "search_target_city_intent": 0,
+                "intelligent_expansion": 0
+            }
+        }
+        
+        # 构建计划
+        campaign = {
+            "campaign_name": campaign_name,
+            "marketing_target": _marketing_target,
+            "placement": _placement,
+            "promotion_target": 1,
+            "optimize_objective": optimize_objective,
+            "deep_optimize_objective": -1,
+            "bidding_strategy": _bidding_strategy,
+            "pacing_mode": 1,
+            "search_flag": _search_flag,
+            "limit_day_budget": 1,
+            "origin_campaign_day_budget": daily_budget,
+            "time_type": 0,
+            "time_period_type": 0,
+            "time_period": time_period,
+            "explore_state": 0,
+            "horse_race": 0
+        }
+        
+        # 发起创建
+        result = self.cascade_create(1, [{
+            "campaign": campaign,
+            "unit_with_creative_list": [{
+                "unit": unit,
+                "creativity_list": [creative]
+            }]
+        }])
+        
+        if result.get("success"):
+            info = result["data"]["info_list"][0]
+            campaign_id = info["campaign"]["campaign_id"]
+            unit_id = info["unit_with_creative_list"][0]["unit"]["unit_id"]
+            
+            # 如果有关键词，自动添加
+            keyword_result = None
+            if keywords:
+                keyword_result = self.add_unit_keyword(unit_id, keywords)
+            
+            # 如果有行业关键词，自动获取推荐关键词
+            if industry_keyword:
+                try:
+                    rec = self.get_keyword_recommend(industry_keyword)
+                    if rec.get("success") and rec.get("data", {}).get("keywords"):
+                        auto_keywords = [{"keyword": kw, "bid": 0, "phrase_match_type": 0} 
+                                       for kw in rec["data"]["keywords"][:10]]
+                        self.add_unit_keyword(unit_id, auto_keywords)
+                except Exception:
+                    pass  # 关键词推荐失败不影响主流程
+            
+            return {
+                "success": True,
+                "campaign_id": campaign_id,
+                "unit_id": unit_id,
+                "creativity_id": info["unit_with_creative_list"][0]["creativity_list"][0]["creativity_id"],
+                "keyword_result": keyword_result
+            }
+        return result
 
     def create_campaign_with_creatives(self, campaign_name, note_ids, unit_name=None,
                                         marketing_target=9, placement=4, bidding_strategy=7,
