@@ -215,6 +215,9 @@ class AIOperationsAssistant:
         budget_result = self.sdk.get_account_budget()
         if budget_result.get('success'):
             budget_data = budget_result.get('data', {})
+            # 加固：API可能返回list
+            if isinstance(budget_data, list):
+                budget_data = budget_data[0] if len(budget_data) > 0 else {}
             account_budget = budget_data.get('account_budget', 0)  # 单位：分
             limit_day_budget = budget_data.get('limit_day_budget', 0)  # 0=不限，1=指定
             today_spend = budget_data.get('today_spend', 0)  # 单位：分
@@ -2624,56 +2627,83 @@ class AIOperationsAssistant:
         return menu
     
     def get_realtime_open_mouth(self):
-        """🔥 一键获取实时开口数据（用户高频需求）
+        """🔥 一键获取实时开口+进线数据（真正拉了API）
         
-        返回：开口数、消耗、成本，解决"实时数据获取太难用"问题
+        返回：消耗、曝光、点击、进线用户数、主动消息数、线索数、各项成本
         """
         from datetime import datetime
         today = datetime.now().strftime("%Y-%m-%d")
         
-        # 获取实时报表数据
+        # 1. 账户层级实时数据（消耗/曝光/点击）
         realtime_result = self.sdk.get_realtime_report('account', start_date=today, end_date=today)
-        
         if not realtime_result.get('success'):
-            return {
-                'success': False,
-                'message': '获取实时数据失败，请检查网络或API配置'
-            }
+            return {'success': False, 'message': '获取实时数据失败'}
         
         data = realtime_result.get('data') or {}
-        # 修复：API可能返回list（分时数据）或dict（汇总数据）
         if isinstance(data, list):
             data = data[0] if len(data) > 0 else {}
-        # 提取关键数据
-        fee = float(data.get('fee', 0))  # 消耗（分）
-        impression = int(data.get('impression', 0))  # 曝光
-        click = int(data.get('click', 0))  # 点击
         
-        # 转换为元
+        fee = float(data.get('fee', 0))  # 实时报表fee单位是分
         fee_yuan = fee / 100
-        
-        # 计算指标
+        impression = int(data.get('impression', 0))
+        click = int(data.get('click', 0))
         ctr = (click / impression * 100) if impression > 0 else 0
         cpc = (fee_yuan / click) if click > 0 else 0
         
-        # 获取开口数据（需要从创意报表或计划报表中提取）
-        # 注意：聚光API的实时报表可能不直接返回开口数，需要从其他报表获取
-        # 这里先返回基础数据，后续可以扩展
+        # 2. 创意层级离线数据（进线用户数msg_chat_user_cnt只在创意/计划层级！）
+        # 实时账户报表(articleId=2731验证)有message_user/initiative_message/msg_leads_num
+        # 但没有msg_chat_user_cnt，进线数需要从离线创意报表获取
+        msg_chat_users = 0
+        msg_leads = 0
+        valid_leads = 0
+        
+        yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+        creative_result = self.sdk.get_offline_report('creative', yesterday, yesterday, time_unit='SUMMARY')
+        if creative_result.get('success'):
+            cdata = creative_result.get('data', {})
+            if isinstance(cdata, dict):
+                agg = cdata.get('aggregation_data', cdata.get('data', {}))
+                msg_chat_users = int(agg.get('msg_chat_user_cnt', 0))
+                msg_leads = int(agg.get('msg_leads_num', 0))
+                valid_leads = int(agg.get('valid_leads', 0))
+        
+        # 3. 计算成本
+        msg_chat_cost = (fee_yuan / msg_chat_users) if msg_chat_users > 0 else 0
+        msg_leads_cost = (fee_yuan / msg_leads) if msg_leads > 0 else 0
+        
+        # 3. 计算成本
+        msg_chat_cost = (fee_yuan / msg_chat_users) if msg_chat_users > 0 else 0
+        msg_leads_cost = (fee_yuan / msg_leads) if msg_leads > 0 else 0
         
         return {
             'success': True,
             'date': today,
-            'data': {
-                'fee_yuan': fee_yuan,
+            'base': {
+                'fee_yuan': round(fee_yuan, 2),
                 'impression': impression,
                 'click': click,
                 'ctr': round(ctr, 2),
                 'cpc': round(cpc, 2),
-                # 开口数据需要从其他接口获取，这里先返回0
-                'open_mouth': 0,
-                'open_mouth_cost': 0,
             },
-            'message': f'实时数据获取成功，今日消耗 {fee_yuan:.2f} 元'
+            'account_realtime': {  # 账户实时报表（articleId=2731验证）
+                'message': int(data.get('message', 0)),
+                'message_user': int(data.get('message_user', 0)),
+                'message_consult': int(data.get('message_consult', 0)),
+                'initiative_message': int(data.get('initiative_message', 0)),
+                'msg_leads_num': int(data.get('msg_leads_num', 0)),
+                'leads': int(data.get('leads', 0)),
+                'valid_leads': int(data.get('valid_leads', 0)),
+                'phone_call_cnt': int(data.get('phone_call_cnt', 0)),
+            },
+            'conversion': {  # 创意级离线数据（进线用户数仅在此层级）
+                'msg_chat_users': msg_chat_users,        # 进线用户数
+                'msg_chat_cost': round(msg_chat_cost, 2), # 进线成本
+                'msg_leads': msg_leads,                    # 私信线索
+                'msg_leads_cost': round(msg_leads_cost, 2),# 线索成本
+                'valid_leads': valid_leads,                # 有效线索
+                'note': '进线数=msg_chat_user_cnt来自创意离线报表(T+1), 实时不包含此字段'
+            },
+            'message': f'消耗{fee_yuan:.2f}元，消息用户{data.get("message_user",0)}人，进线{msg_chat_users}人(昨日)，进线成本{msg_chat_cost:.2f}元'
         }
     
     def get_running_campaigns(self):
@@ -2712,10 +2742,7 @@ class AIOperationsAssistant:
         }
     
     def monitor_report(self):
-        """🔥 生成实时监控报告（用户高频需求）
-        
-        返回：包含消耗、曝光、点击、CTR、CPC等关键指标的监控报告
-        """
+        """🔥 生成实时监控报告 — 覆盖消耗/曝光/点击/进线/成本+环比"""
         from datetime import datetime, timedelta
         
         today = datetime.now().strftime("%Y-%m-%d")
@@ -2723,49 +2750,49 @@ class AIOperationsAssistant:
         
         # 获取今日实时数据
         today_data = self.get_realtime_open_mouth()
+        if not today_data.get('success'):
+            return {'success': False, 'message': '生成监控报告失败'}
+        
+        today_base = today_data.get('base', {})
+        today_conv = today_data.get('conversion', {})
         
         # 获取昨日数据用于对比
         yesterday_data = self.sdk.get_daily_cost(yesterday)
-        
-        if not today_data.get('success'):
-            return {
-                'success': False,
-                'message': '生成监控报告失败'
-            }
-        
-        today_info = today_data.get('data', {})
         yesterday_cost = float(yesterday_data.get('total_cost', 0))
         yesterday_impression = int(yesterday_data.get('total_impression', 0))
         yesterday_click = int(yesterday_data.get('total_click', 0))
         
         # 计算环比变化
-        cost_change = ((today_info['fee_yuan'] - yesterday_cost) / yesterday_cost * 100) if yesterday_cost > 0 else 0
-        impression_change = ((today_info['impression'] - yesterday_impression) / yesterday_impression * 100) if yesterday_impression > 0 else 0
-        click_change = ((today_info['click'] - yesterday_click) / yesterday_click * 100) if yesterday_click > 0 else 0
+        cost_change = ((today_base['fee_yuan'] - yesterday_cost) / yesterday_cost * 100) if yesterday_cost > 0 else 0
+        impression_change = ((today_base['impression'] - yesterday_impression) / yesterday_impression * 100) if yesterday_impression > 0 else 0
+        click_change = ((today_base['click'] - yesterday_click) / yesterday_click * 100) if yesterday_click > 0 else 0
         
         return {
             'success': True,
             'date': today,
-            'report': {
-                'today': {
-                    'cost': today_info['fee_yuan'],
-                    'impression': today_info['impression'],
-                    'click': today_info['click'],
-                    'ctr': today_info['ctr'],
-                    'cpc': today_info['cpc'],
-                },
-                'yesterday': {
-                    'cost': yesterday_cost,
-                    'impression': yesterday_impression,
-                    'click': yesterday_click,
-                },
-                'change': {
-                    'cost': round(cost_change, 2),
-                    'impression': round(impression_change, 2),
-                    'click': round(click_change, 2),
-                }
+            'today': {
+                'cost': today_base['fee_yuan'],
+                'impression': today_base['impression'],
+                'click': today_base['click'],
+                'ctr': today_base['ctr'],
+                'cpc': today_base['cpc'],
+                # 进线数据
+                'msg_chat_users': today_conv.get('msg_chat_users', 0),
+                'msg_chat_cost': today_conv.get('msg_chat_cost', 0),
+                'initiative_msgs': today_conv.get('initiative_msgs', 0),
+                'msg_leads': today_conv.get('msg_leads', 0),
             },
-            'message': f'监控报告生成成功，今日消耗 {today_info["fee_yuan"]:.2f} 元，环比 {"↑" if cost_change > 0 else "↓"} {abs(cost_change):.1f}%'
+            'yesterday': {
+                'cost': yesterday_cost,
+                'impression': yesterday_impression,
+                'click': yesterday_click,
+            },
+            'change': {
+                'cost': round(cost_change, 2),
+                'impression': round(impression_change, 2),
+                'click': round(click_change, 2),
+            },
+            'message': f'今日消耗{today_base["fee_yuan"]:.2f}元，进线{today_conv.get("msg_chat_users",0)}人，进线成本{today_conv.get("msg_chat_cost",0):.2f}元'
         }
     
     def get_smart_bid_recommendation(self, campaign_id=None):
