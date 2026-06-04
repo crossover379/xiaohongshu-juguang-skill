@@ -36,6 +36,9 @@ agent_created: true
 | 💰 出价 | `sdk.update_unit_bid()` | 直接改出价 |
 | ⚠️ 预警 | `get_channel_cost_alert()` | 搜索/信息流分渠道告警 |
 | 🧠 学习 | `learn_from_daily_review()` | 每日复盘自动学 |
+| 📋 日报 | `generate_daily_report()` | 一键生成消耗+开口+进线+成本日报 |
+| 📊 对比 | `compare_campaigns()` | 计划ROI排名+自动推荐最优 |
+| 🤖 优化 | `auto_optimize_schedule()` | 智能建议：暂停低效/加预算/降价 |
 | 🔒 安全 | 自动遮盖敏感信息 | advertiser_id等不外泄 |
 | 📋 字段 | API字段→业务指标映射表 | 22个字段精准映射 |
 
@@ -388,7 +391,7 @@ eCPM = 内容质量分(60%) × 人群匹配度(25%) × 出价竞争力(15%) × �
 
 ```
 📊 数据层：展示客观数据（消耗、曝光、CTR……）
-🔍 解读层：和行业基准对比，告诉用户这意味什么
+🔍 解读层：和历史数据对比、分渠道分析，告诉用户这意味什么
 💡 建议层：基于分析给出明确的可执行建议
 🙋 行动层：主动问「要不要我帮你做？」
 ```
@@ -1401,6 +1404,9 @@ AI：
 | 🔥 出价修改 | `sdk.update_unit_bid()` | — |
 | 🧠 学习报告 | `get_learning_system_report()` | `self_learning` |
 | 🔒 隐私保护状态 | `get_privacy_protection_status()` | `self_learning` |
+| 📋 一键日报 | `generate_daily_report(date)` | `self_learning`（自动学习） |
+| 📊 计划对比 | `compare_campaigns(date)` | — |
+| 🤖 智能优化 | `auto_optimize_schedule()` | — |
 
 **日常操作 90% 走 ai_assistant。仅在需要学习/预测/AB测试/归因等高级分析时，才直接调用专项模块。**
 
@@ -1726,9 +1732,9 @@ assistant.batch_toggle_campaigns([123456, 789012], action='resume')
 **这是 v5.1.1 最核心的能力：AI通过每日复盘逐步掌握你的账户规律。**
 
 ```
-第1天：冷启动 — 基于行业基准给出建议（搜索1.5~2元，信息流1~1.5元）
+第1天：冷启动 — 数据不足，不硬编建议。告诉你「先跑3天再来问」
 第2天：初学 — 记录你的CPA、CTR等真实数据
-第3天：可用 — 基于你的历史CPA、CTR推荐出价，比行业基准更准
+第3天：可用 — 基于你的历史CPA推算建议出价（你账户CPA的80%），不再用通用数字
 第7天：成熟 — 对你的账户了如指掌，出价建议、预警阈值全定制
 ```
 

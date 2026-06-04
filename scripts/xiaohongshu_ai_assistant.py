@@ -153,13 +153,11 @@ class AIOperationsAssistant:
                     '用户明确反馈的问题'
                 )
         
-        # 添加最佳实践
+        # 添加最佳实践（仅记录已验证的真实数据，不硬编码行业标准）
         best_practices = [
-            ('bidding', '搜索渠道出价建议', '搜索渠道建议出价1.5-2.0元，最低0.3元', '行业标准'),
-            ('bidding', '信息流渠道出价建议', '信息流渠道建议出价1.0-1.5元，最低0.2元', '行业标准'),
-            ('bidding', '全站推广出价建议', '全站推广建议出价2.0-3.0元，最低0.5元', '行业标准'),
             ('cost_control', '成本预警阈值', '开口成本超过2元时自动告警', '用户反馈'),
             ('data_access', '实时数据获取', '使用get_realtime_open_mouth()一键获取开口+消耗+成本', '用户反馈'),
+            ('data_access', '字段映射', 'msg_chat_user_cnt=进线用户数, initiative_message=主动消息数', '官方API文档验证'),
         ]
         
         for category, title, content, source in best_practices:
@@ -237,6 +235,12 @@ class AIOperationsAssistant:
         realtime_result = self.sdk.get_realtime_report('account', start_date=today, end_date=today)
         if realtime_result.get('success'):
             realtime_data = realtime_result.get('data') or {}
+            # 修复：API可能返回list（分时数据）或dict（汇总数据）
+            if isinstance(realtime_data, list):
+                if len(realtime_data) > 0:
+                    realtime_data = realtime_data[0]  # 取第一条
+                else:
+                    realtime_data = {}
             dashboard['today_data'] = {
                 'total_cost': float(realtime_data.get('fee', 0)),
                 'normal_cost': 0,  # 实时接口不区分标准投/简单投
@@ -2637,7 +2641,9 @@ class AIOperationsAssistant:
             }
         
         data = realtime_result.get('data') or {}
-        
+        # 修复：API可能返回list（分时数据）或dict（汇总数据）
+        if isinstance(data, list):
+            data = data[0] if len(data) > 0 else {}
         # 提取关键数据
         fee = float(data.get('fee', 0))  # 消耗（分）
         impression = int(data.get('impression', 0))  # 曝光
@@ -2769,71 +2775,62 @@ class AIOperationsAssistant:
         """
         from datetime import datetime, timedelta
         
-        # 获取行业基准
-        industry_benchmarks = {
-            '搜索': {'min': 0.3, 'max': 3.0, 'recommended': 1.5},
-            '信息流': {'min': 0.2, 'max': 2.0, 'recommended': 1.0},
-            '全站': {'min': 0.5, 'max': 5.0, 'recommended': 2.0},
-        }
-        
-        # 从学习系统获取最佳实践
-        bidding_practices = self.learning_system.get_best_practices('bidding', min_confidence=0.6)
-        
-        # 从账户画像中获取学习到的数据
-        channel_profiles = self.learning_system.get_channel_profile()
+        # 从账户画像中获取学习到的数据（唯一的出价依据！）
         search_profile = self.learning_system.get_channel_profile('搜索')
         feed_profile = self.learning_system.get_channel_profile('信息流')
         
-        # 构建建议 — 优先使用学习到的数据
+        # 构建建议 — 100%基于账户真实数据，不硬编码任何行业标准
         recommendations = {}
+        has_any_data = False
         
-        # 搜索渠道建议（如果有学习数据就用，否则默认）
+        # 搜索渠道
         if search_profile and search_profile.get('sample_count', 0) >= 3:
-            learned_cpa = search_profile.get('cpa', 2.0)
+            learned_cpa = search_profile.get('cpa', 0)
             recommendations['搜索渠道'] = {
-                'min_bid': 0.3,
-                'max_bid': 3.0,
-                'recommended_bid': round(learned_cpa * 0.8, 1),  # 基于实际CPA的80%建议出价
-                'reason': f'基于{search_profile["sample_count"]}天数据，历史CPA {learned_cpa:.2f}元，建议出价{learned_cpa * 0.8:.1f}元',
+                'recommended_bid': round(learned_cpa * 0.8, 2),
+                'reason': f'基于{search_profile["sample_count"]}天真实数据：平均CPA {learned_cpa:.2f}元，建议出价{learned_cpa * 0.8:.2f}元',
                 'confidence': search_profile.get('confidence', 0.7),
-                'source': '账户学习'
+                'source': f'你的账户（{search_profile["sample_count"]}天数据）',
+                'data': f'CTR {search_profile.get("ctr",0):.1f}%, CPC {search_profile.get("cpc",0):.2f}元'
             }
+            has_any_data = True
         else:
-            search_practice = next((p for p in bidding_practices if '搜索' in p['title']), None)
             recommendations['搜索渠道'] = {
-                'min_bid': 0.3, 'max_bid': 3.0, 'recommended_bid': 1.5,
-                'reason': '搜索用户意图明确，建议出价1.5-2.0元（积累3天数据后会基于你的账户定制）',
-                'confidence': 0.5, 'source': '行业基准'
+                'recommended_bid': None,
+                'reason': '⚠️ 搜索渠道数据不足（需要至少3天），建议先用系统建议出价跑几天再来问',
+                'confidence': 0,
+                'source': '无数据',
+                'data': None
             }
         
-        # 信息流渠道建议
+        # 信息流渠道
         if feed_profile and feed_profile.get('sample_count', 0) >= 3:
-            learned_cpa = feed_profile.get('cpa', 2.0)
+            learned_cpa = feed_profile.get('cpa', 0)
             recommendations['信息流渠道'] = {
-                'min_bid': 0.2, 'max_bid': 2.0,
-                'recommended_bid': round(learned_cpa * 0.7, 1),
-                'reason': f'基于{feed_profile["sample_count"]}天数据，历史CPA {learned_cpa:.2f}元，建议出价{learned_cpa * 0.7:.1f}元',
-                'confidence': feed_profile.get('confidence', 0.7), 'source': '账户学习'
+                'recommended_bid': round(learned_cpa * 0.7, 2),
+                'reason': f'基于{feed_profile["sample_count"]}天真实数据：平均CPA {learned_cpa:.2f}元，建议出价{learned_cpa * 0.7:.2f}元',
+                'confidence': feed_profile.get('confidence', 0.7),
+                'source': f'你的账户（{feed_profile["sample_count"]}天数据）',
+                'data': f'CTR {feed_profile.get("ctr",0):.1f}%, CPC {feed_profile.get("cpc",0):.2f}元'
             }
+            has_any_data = True
         else:
-            feed_practice = next((p for p in bidding_practices if '信息流' in p['title']), None)
             recommendations['信息流渠道'] = {
-                'min_bid': 0.2, 'max_bid': 2.0, 'recommended_bid': 1.0,
-                'reason': '信息流流量大但意图弱，建议出价1.0-1.5元（积累3天数据后会定制）',
-                'confidence': 0.5, 'source': '行业基准'
+                'recommended_bid': None,
+                'reason': '⚠️ 信息流渠道数据不足（需要至少3天），建议先用系统建议出价跑几天再来问',
+                'confidence': 0,
+                'source': '无数据',
+                'data': None
             }
         
-        # 全站推广建议
-        all_practice = next((p for p in bidding_practices if '全站' in p['title']), None)
+        # 全站推广
         recommendations['全站推广'] = {
-            'min_bid': 0.5, 'max_bid': 5.0, 'recommended_bid': 2.0,
-            'reason': '全站推广覆盖广，建议出价2.0-3.0元',
-            'confidence': 0.5, 'source': '行业基准'
+            'recommended_bid': None,
+            'reason': '⚠️ 全站推广建议等搜索/信息流跑出数据后再开，不建议冷启动直接上全站',
+            'confidence': 0,
+            'source': '投手经验',
+            'data': None
         }
-        
-        # 从学习系统获取相关建议
-        suggestions = self.learning_system.get_suggestions('出价')
-        avoid_reason = self.learning_system.should_avoid('出价调整')
         
         # 账户画像快照
         account_snapshot = self.learning_system.get_account_snapshot()
@@ -2841,10 +2838,9 @@ class AIOperationsAssistant:
         result = {
             'success': True,
             'recommendations': recommendations,
-            'learning_suggestions': suggestions[:3],
-            'avoid_warning': avoid_reason,
+            'has_data': has_any_data,
             'account_readiness': account_snapshot.get('readiness', ''),
-            'message': f'智能出价建议已生成（{account_snapshot.get("readiness","")}）'
+            'message': f'{"基于你的真实账户数据" if has_any_data else "数据不足，无法给出有效建议。每天看数据跑3天再来问"}'
         }
         
         return result
@@ -2973,6 +2969,280 @@ class AIOperationsAssistant:
             'total_records': len(self.learning_system.feedback_history) + len(self.learning_system.error_history),
             'all_masked': True,  # 所有记录都经过隐私处理
             'message': '所有敏感信息已遮盖，包括advertiser_id、app_secret、access_token等'
+        }
+    
+    def generate_daily_report(self, date=None):
+        """🔥 一键生成日报 — 覆盖消耗、开口、进线、成本
+        
+        Args:
+            date: 日期，默认昨天
+            
+        Returns:
+            结构化日报数据
+        """
+        from datetime import datetime, timedelta
+        
+        if date is None:
+            date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+        
+        # 拉取基础数据
+        cost_data = self.sdk.get_daily_cost(date)
+        if not cost_data:
+            return {'success': False, 'message': f'无法获取{date}数据'}
+        
+        total_cost = float(cost_data.get('total_cost', 0))
+        total_impression = int(cost_data.get('total_impression', 0))
+        total_click = int(cost_data.get('total_click', 0))
+        
+        # 拉取创意层级数据（获取进线、开口等私信指标）
+        creative_report = self.sdk.get_offline_report('creative', date, date, time_unit='SUMMARY')
+        msg_chat_users = 0  # 进线用户数
+        initiative_msgs = 0  # 主动消息数
+        msg_leads = 0  # 私信线索数
+        
+        if creative_report.get('success'):
+            agg = creative_report.get('data', {}).get('aggregation_data', {})
+            msg_chat_users = int(agg.get('msg_chat_user_cnt', 0))
+            initiative_msgs = int(agg.get('initiative_message', 0))
+            msg_leads = int(agg.get('msg_leads_num', 0))
+        
+        # 计算关键指标
+        ctr = (total_click / total_impression * 100) if total_impression > 0 else 0
+        cpc = (total_cost / total_click) if total_click > 0 else 0
+        cpm = (total_cost / total_impression * 1000) if total_impression > 0 else 0
+        msg_cost = (total_cost / msg_chat_users) if msg_chat_users > 0 else 0  # 进线成本
+        
+        # 环比数据
+        yesterday = (datetime.strptime(date, '%Y-%m-%d') - timedelta(days=1)).strftime('%Y-%m-%d')
+        yesterday_data = self.sdk.get_daily_cost(yesterday)
+        yesterday_cost = float(yesterday_data.get('total_cost', 0))
+        cost_change = ((total_cost - yesterday_cost) / yesterday_cost * 100) if yesterday_cost > 0 else 0
+        
+        report = {
+            'success': True,
+            'date': date,
+            'summary': {
+                'cost': round(total_cost, 2),
+                'impression': total_impression,
+                'click': total_click,
+                'ctr': round(ctr, 2),
+                'cpc': round(cpc, 2),
+                'cpm': round(cpm, 2),
+            },
+            'conversion': {
+                'msg_chat_users': msg_chat_users,  # 进线用户数
+                'initiative_msgs': initiative_msgs,  # 主动消息数
+                'msg_leads': msg_leads,              # 私信线索数
+                'msg_cost': round(msg_cost, 2),      # 进线成本
+            },
+            'change': {
+                'cost': round(cost_change, 1),
+                'vs_date': yesterday
+            },
+            'alerts': []
+        }
+        
+        # 成本预警
+        if msg_cost > 2 and msg_chat_users > 0:
+            report['alerts'].append(f'⚠️ 进线成本{msg_cost:.2f}元，超标（阈值2元）')
+        if cost_change > 50:
+            report['alerts'].append(f'⚠️ 消耗环比暴涨{cost_change:.0f}%，建议排查')
+        if ctr < 5 and total_impression > 1000:
+            report['alerts'].append(f'⚠️ CTR仅{ctr:.1f}%，低于正常水平')
+        
+        # 记录到学习系统
+        self.learning_system.learn_from_daily_review({
+            'date': date,
+            'total_cost': total_cost,
+            'impression': total_impression,
+            'click': total_click,
+            'ctr': ctr,
+            'cpc': cpc,
+            'channels': {},  # 日报不细分渠道
+            'campaigns': []
+        })
+        
+        return report
+    
+    def compare_campaigns(self, date=None, top_n=10):
+        """🔥 计划对比分析 — 自动推荐最优计划
+        
+        Args:
+            date: 日期，默认昨天
+            top_n: 对比前N个计划
+            
+        Returns:
+            按ROI排序的计划列表和建议
+        """
+        from datetime import datetime, timedelta
+        
+        if date is None:
+            date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+        
+        # 拉取计划数据
+        campaigns = self.sdk.get_all_campaigns()
+        if not campaigns.get('success'):
+            return {'success': False, 'message': '无法获取计划列表'}
+        
+        camp_list = campaigns.get('data', {}).get('base_campaign_dtos', [])
+        
+        # 拉取计划层级报表
+        report = self.sdk.get_offline_report('campaign', date, date)
+        report_map = {}
+        if report.get('success'):
+            for item in report.get('data', {}).get('data_list', []):
+                cid = str(item.get('campaign_id', ''))
+                report_map[cid] = item
+        
+        # 分析每个计划
+        analyzed = []
+        for camp in camp_list:
+            if camp.get('explore_status') != 4:  # 只看在投的
+                continue
+            
+            cid = str(camp.get('campaign_id'))
+            name = camp.get('campaign_name', '未命名')
+            
+            item = report_map.get(cid, {})
+            fee = float(item.get('fee', 0))
+            imp = int(item.get('impression', 0))
+            click = int(item.get('click', 0))
+            ctr = (click / imp * 100) if imp > 0 else 0
+            cpc = (fee / click) if click > 0 else 0
+            
+            # 获取转化数据
+            creative_r = self.sdk.get_offline_report('creative', date, date)
+            convert = 0
+            if creative_r.get('success'):
+                for ci in creative_r.get('data', {}).get('data_list', []):
+                    if str(ci.get('campaign_id', '')) == cid:
+                        convert += int(ci.get('convert_cnt', 0))
+            
+            cpa = (fee / convert) if convert > 0 else 0
+            
+            # 综合评分：消耗权重40% + CTR30% + 转化30%
+            score = min(fee / 50 * 40, 40)  # 消耗分（50元满分）
+            score += min(ctr / 20 * 30, 30)  # CTR分（20%满分）
+            if convert > 0:
+                score += 30  # 有转化就满分
+            elif fee > 50:
+                score -= 20  # 花了钱没转化扣分
+            
+            analyzed.append({
+                'id': cid,
+                'name': name,
+                'cost': round(fee, 2),
+                'impression': imp,
+                'click': click,
+                'ctr': round(ctr, 2),
+                'cpc': round(cpc, 2),
+                'convert': convert,
+                'cpa': round(cpa, 2) if cpa > 0 else None,
+                'score': round(score, 1)
+            })
+        
+        # 按评分排序
+        analyzed.sort(key=lambda x: x['score'], reverse=True)
+        analyzed = analyzed[:top_n]
+        
+        # 分类
+        stars = [c for c in analyzed if c['score'] >= 70]
+        good = [c for c in analyzed if 50 <= c['score'] < 70]
+        poor = [c for c in analyzed if c['score'] < 50]
+        
+        return {
+            'success': True,
+            'date': date,
+            'total_analyzed': len(analyzed),
+            'ranking': analyzed,
+            'stars': stars,  # 优秀计划
+            'good': good,    # 正常计划
+            'poor': poor,    # 需优化计划
+            'recommendation': stars[0]['name'] if stars else '暂无优秀计划',
+            'message': f'共分析{len(analyzed)}个在投计划，{len(stars)}个优秀，{len(poor)}个需优化'
+        }
+    
+    def auto_optimize_schedule(self, action='suggest'):
+        """🔥 智能优化建议 — 根据数据给出自动优化方案（需用户确认才执行）
+        
+        Args:
+            action: 'suggest'=仅建议, 'execute'=自动执行（需用户确认后调用）
+            
+        Returns:
+            优化方案列表
+        """
+        suggestions = []
+        
+        # 1. 检查低效计划
+        analysis = self.analyze_campaign_performance()
+        for camp in analysis.get('low_efficiency', []):
+            suggestions.append({
+                'type': 'pause_campaign',
+                'target': camp['name'],
+                'target_id': camp['id'],
+                'reason': f'低效计划，消耗{camp.get("cost",0):.2f}元，CTR{camp.get("ctr",0):.1f}%',
+                'impact': f'暂停后每日节省约{camp.get("cost",0):.2f}元',
+                'action': '建议暂停'
+            })
+        
+        # 2. 检查优秀计划（建议加预算）
+        for camp in analysis.get('high_efficiency', []):
+            current_budget = camp.get('budget', 100)
+            new_budget = min(current_budget * 1.3, current_budget + 100)  # +30%或+100
+            suggestions.append({
+                'type': 'increase_budget',
+                'target': camp['name'],
+                'target_id': camp['id'],
+                'reason': f'高效计划，CTR{camp.get("ctr",0):.1f}%',
+                'impact': f'预算从{current_budget}元 → {new_budget:.0f}元',
+                'action': '建议加预算'
+            })
+        
+        # 3. 成本预警 — 检查学习系统中的渠道数据
+        channel_alert = self.get_channel_cost_alert()
+        for alert in channel_alert.get('alerts', []):
+            if alert.get('status') == '🔴 超标':
+                suggestions.append({
+                    'type': 'cost_alert',
+                    'target': alert['channel'],
+                    'reason': f'{alert["channel"]}CPA{alert["current_cpa"]}元，超标',
+                    'impact': alert.get('suggestion', ''),
+                    'action': '建议降价'
+                })
+        
+        if action == 'suggest':
+            return {
+                'success': True,
+                'suggestions': suggestions,
+                'total': len(suggestions),
+                'message': f'共{len(suggestions)}条优化建议，回复「执行」逐条确认',
+                'note': '以上均为建议，不会自动执行'
+            }
+        
+        # execute模式：用户已确认
+        executed = []
+        failed = []
+        for s in suggestions:
+            try:
+                if s['type'] == 'pause_campaign':
+                    r = self.execute_action('pause_campaign', s['target_id'])
+                elif s['type'] == 'increase_budget':
+                    r = self.execute_action('update_budget', s['target_id'], {'budget': s.get('impact', '')})
+                else:
+                    r = {'success': True, 'message': '仅预警，无需执行'}
+                
+                if r.get('success'):
+                    executed.append(s['target'])
+                else:
+                    failed.append({'target': s['target'], 'reason': r.get('message', '未知')})
+            except Exception as e:
+                failed.append({'target': s.get('target', '未知'), 'reason': str(e)})
+        
+        return {
+            'success': True,
+            'executed': executed,
+            'failed': failed,
+            'message': f'执行完成：成功{len(executed)}条，失败{len(failed)}条'
         }
 
 

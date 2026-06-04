@@ -694,7 +694,37 @@ if __name__ == "__main__":
     system.record_error('api', 'API返回超时', {'endpoint': '/data/report/realtime'}, '增加重试机制')
     
     system.add_learning_note('user_behavior', '用户希望一键获取开口数据', '用户反馈', 8)
-    system.add_best_practice('bidding', '搜索渠道出价建议', '搜索渠道建议出价1.5-2.0元', '行业标准')
+    system.add_learning_note('api_knowledge', 'msg_chat_user_cnt=进线用户数, initiative_message=主动消息数', '官方API文档', 8)
+    
+    # 模拟3天账户学习数据（演示真实数据驱动出价建议）
+    system.learn_from_daily_review({
+        'date': '2026-06-01',
+        'total_cost': 150,
+        'channels': {
+            '搜索': {'cost': 100, 'click': 200, 'ctr': 18, 'convert': 8, 'cpa': 12.5},
+            '信息流': {'cost': 50, 'click': 300, 'ctr': 15, 'convert': 3, 'cpa': 16.7}
+        }
+    })
+    system.learn_from_daily_review({
+        'date': '2026-06-02',
+        'total_cost': 180,
+        'channels': {
+            '搜索': {'cost': 120, 'click': 250, 'ctr': 19, 'convert': 10, 'cpa': 12.0},
+            '信息流': {'cost': 60, 'click': 350, 'ctr': 16, 'convert': 4, 'cpa': 15.0}
+        }
+    })
+    system.learn_from_daily_review({
+        'date': '2026-06-03',
+        'total_cost': 200,
+        'channels': {
+            '搜索': {'cost': 140, 'click': 280, 'ctr': 20, 'convert': 12, 'cpa': 11.7},
+            '信息流': {'cost': 60, 'click': 320, 'ctr': 14, 'convert': 5, 'cpa': 12.0}
+        }
+    })
+    
+    print("搜索渠道画像:", system.get_channel_profile('搜索'))
+    print("信息流渠道画像:", system.get_channel_profile('信息流'))
+    print("账户快照:", system.get_account_snapshot())
     
     # 输出报告
     print(system.export_report())
